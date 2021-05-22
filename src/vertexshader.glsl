@@ -24,7 +24,7 @@ void main()
     gl_Position = mvp * vec4( vertexPos, 1 );
     vec3 fragTan = (vec3( mv*vec4( vertexTangent, 1 ) ));
     vec3 fragPos = (vec3( mv*vec4( vertexPos, 1 ) ));
-    vec3 fragNormal = normalize(vec3(mv*vec4( vertexNormal, 0 ) ));
+    vec3 fragNormal = normalize(vec3(mv_ti*vec4( vertexNormal, 0 ) ));
 
     //fragTan = normalize(fragTan - dot(fragTan, fragNormal)*fragNormal);
     vec3 binormal = cross(fragNormal, fragTan);

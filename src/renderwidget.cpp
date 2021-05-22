@@ -13,7 +13,7 @@
 #endif
 
 
-const bool isQuadStones = true;
+const bool isQuadStones = false;
 
 RenderWidget::RenderWidget(QWidget *parent)
     : QOpenGLWidget(parent)

@@ -23,7 +23,8 @@ vec3 expand (vec3 v)
 
 void main()
 {
-    vec3 ambient = material.ambient * texture(sampler, mapCoord).rgb;
+    vec3 ambient = material.ambient;
+    //ambient *= texture(sampler, mapCoord).rgb; // Descomentar essa linha para adicionar mapeamento de textura na cor
     vec3 diffuse = vec3(0.0,0.0,0.0);
     vec3 specular = vec3(0.0,0.0,0.0);
 
@@ -37,7 +38,8 @@ void main()
     float iSpec = 0.0;
     if( NdotL > 0 )
     {
-        diffuse = diff * material.diffuse * texture(sampler, mapCoord).rgb;
+        diffuse = diff * material.diffuse;
+        //diffuse *= texture(sampler, mapCoord).rgb; // Descomentar essa linha para adicionar mapeamento de textura na cor
         vec3 reflected = normalize(reflect(-L, N));
         //vec3 viewer = normalize(-fragPos);
         iSpec = pow(max(dot(reflected,viewDir),0.0), material.shininess);
