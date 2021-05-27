@@ -33,7 +33,7 @@ void RenderWidget::initializeGL()
     //Initializa as funções OpenGL
     initializeOpenGLFunctions();
 
-    scrollDelta = 0.0;
+    scrollDelta = 45.0f;
     //Define a cor do fundo
     glClearColor(0,0,0,1);
 
@@ -99,13 +99,10 @@ void RenderWidget::paintGL()
     glBindTexture(GL_TEXTURE_2D, textureID);
     program.setUniformValue("sampler", 1);
 
-    int x = 0;
-    int z = 0;
     //Passar as matrizes de transformação
     QMatrix4x4 m;
-    m.translate(x,0,z);
+    m.translate(0,0,0);
     m = rotationMat*m;
-    m.scale(1-scrollDelta/10); // Tentativa de zoom (na verdade é apenas um scale)
 
     //Passar as matrizes mv e mvp
     QMatrix4x4 mv = v * m;
@@ -414,7 +411,12 @@ inline QVector3D getArcballVector(const QPoint& pt, int width, int height)
 }
 
 void RenderWidget::wheelEvent(QWheelEvent *e){
-    scrollDelta +=  e->delta() / 120;
+    scrollDelta +=  e->delta()/120;
+    if(scrollDelta < 1.0f)
+        scrollDelta = 1.0f;
+    if(scrollDelta > 45.0f)
+        scrollDelta = 45.0f;
+    proj = glm::perspective(glm::radians(scrollDelta), static_cast<float>(width())/height(), 0.1f, 100.0f);
     update();
 }
 
