@@ -29,11 +29,10 @@ private:
     //virtual void updateMouse();
     virtual void wheelEvent(QWheelEvent *e);
 
-    void createQuad();
+    void createCube();
     void createSphere();
     void createVBO();
     void createTexture(const std::string& imagePath);
-    void createNormalTexture(const std::string& imagePath);
 
     QOpenGLShaderProgram program;
 
@@ -44,8 +43,6 @@ private:
     std::vector< glm::vec3 > vertices;
     std::vector< glm::vec3 > normals;
     std::vector< glm::vec2 > texCoords;
-    std::vector< glm::vec3 > tangents;
-    std::vector< glm::vec3 > bitangents;
     std::vector< unsigned int > indices;
 
     glm::mat4x4 view;
@@ -53,7 +50,6 @@ private:
     QMatrix4x4 rotationMat;
     QPoint rotPos;
 
-    unsigned int normalTextureID;
     unsigned int textureID;
 };
 

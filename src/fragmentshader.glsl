@@ -6,44 +6,32 @@ struct Material
     vec3 specular;
     float shininess;
 };
-uniform Material material;
-uniform sampler2D normalSampler; // Mapa de Normal
-uniform sampler2D sampler; // Textura
-
-in vec2 mapCoord; // Coordenadas do Mapa de Normal
-in vec3 lightDir; // Direção da Luz em Espaço Tangente
-in vec3 viewDir;  // Direção do Olho em Espaço Tangente
-
-out vec3 finalColor; // Cor do Fragmento
-
-vec3 expand (vec3 v)
+struct Light
 {
-    return v*2.0-1.0;
-}
-
+    vec3 position; //No espaço da câmera
+};
+uniform Light light;
+uniform Material material;
+in vec3 fragPos;
+in vec3 fragNormal;
+in vec2 fragUV;
+uniform sampler2D sampler;
+out vec3 finalColor;
 void main()
 {
-    vec3 ambient = material.ambient * texture(sampler, mapCoord).rgb;
+    vec3 ambient = material.ambient * texture(sampler, fragUV).rgb;
     vec3 diffuse = vec3(0.0,0.0,0.0);
     vec3 specular = vec3(0.0,0.0,0.0);
-
-    vec3 N = expand(texture(normalSampler, mapCoord).rgb);
-    vec3 L = normalize(lightDir);
-
-    float NdotL = dot(N,L);
-    float diff = max(NdotL, 0);
-
-
-    float iSpec = 0.0;
-    if( NdotL > 0 )
+    vec3 N = normalize(fragNormal);
+    vec3 L = normalize(light.position - fragPos);
+    float iDif = dot(L,N);
+    if( iDif > 0 )
     {
-        diffuse = diff * material.diffuse * texture(sampler, mapCoord).rgb;
-        vec3 reflected = normalize(reflect(-L, N));
-        //vec3 viewer = normalize(-fragPos);
-        iSpec = pow(max(dot(reflected,viewDir),0.0), material.shininess);
+        diffuse = iDif * material.diffuse * texture(sampler, fragUV).rgb;
+        vec3 V = normalize(-fragPos);
+        vec3 H = normalize(L + V);
+        float iSpec = pow(max(dot(N,H),0.0), material.shininess);
         specular = iSpec * material.specular;
     }
-
-
     finalColor = ambient + diffuse + specular;
 }
