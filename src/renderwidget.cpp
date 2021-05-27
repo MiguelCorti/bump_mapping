@@ -62,7 +62,7 @@ void RenderWidget::initializeGL()
     shadowProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/shadowmap_fragmentshader.glsl");
     shadowProgram.link();
 
-    eye = glm::vec3(-1.0,4.0,8.0);
+    eye = glm::vec3(-3.0,3.0,4.0);
     glm::vec3 center(0,0,0);
     glm::vec3 up(0,1,0);
 
@@ -80,7 +80,7 @@ void RenderWidget::initializeGL()
 //    createTexture("../src/cube_texture.png");
 
     // CRIANDO A ESFERA
-//    createSphere();
+    createSphere();
     createTexture("../src/wood_texture02.jpeg");
     // Cria VBO e VAO da Esfera
 //    createVBO();
@@ -146,11 +146,11 @@ void RenderWidget::paintGL()
     // 1) RENDERIZA A CENA NA POSIÇÃO DA LUZ E GUARDA O DEPTH MAP
     glm::mat4 lightProjection, lightView, lightModel(1.0f);
     glm::mat4 lightSpaceMatrix;
-    float near_plane = 1.0f, far_plane = 7.5f;
+    float near_plane = -1.0f, far_plane = 10.0f;
 //    lightProjection = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
     lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
-    lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, -1.0, 0.0));
-    lightModel = glm::rotate(lightModel, glm::radians(-180.0f), glm::normalize(glm::vec3(0.0, 1.0, 1.0)));
+    lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
+//    lightModel = glm::rotate(lightModel, glm::radians(-180.0f), glm::normalize(glm::vec3(0.0, 1.0, 1.0)));
 //    lightModel = glm::rotate(lightModel, glm::radians(-180.0f), glm::normalize(glm::vec3(0.0, 1.0, 0.0)));
     lightSpaceMatrix = lightProjection * lightView * lightModel;
     // Renderiza a cena da posição da luz
@@ -215,6 +215,20 @@ void RenderWidget::renderScene(QOpenGLShaderProgram &shader) {
     // Desenha
     glBindVertexArray(planeVAO);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // DESENHANDO UMA ESFERA
+    m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
+    m.translate(0.0f,1.0f,2.0f);
+    m.scale(0.5f);
+    m = rotationMat*m;
+    mv = v * m;
+    mvp = p * mv;
+    shader.setUniformValue("model", m);
+    shader.setUniformValue("mv", mv);
+    shader.setUniformValue("mv_ti", mv.inverted().transposed());
+    shader.setUniformValue("mvp", mvp);
+    createVBO();
+    glDrawElements(GL_TRIANGLES, static_cast<int>(indices.size()), GL_UNSIGNED_INT, nullptr);
 
     // DESENHANDO OS CUBOS
     // Cubo 01
