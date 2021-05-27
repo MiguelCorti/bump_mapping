@@ -29,7 +29,11 @@ private:
     //virtual void updateMouse();
     virtual void wheelEvent(QWheelEvent *e);
 
+    void renderScene(QOpenGLShaderProgram &shader);
+    void renderQuad();
     void createQuad();
+    void createCube();
+    void renderCube();
     void createSphere();
     void createVBO();
     void createTexture(const std::string& imagePath);
@@ -40,6 +44,8 @@ private:
     unsigned int VAO;
     unsigned int VBO;
     unsigned int EBO;
+    unsigned int depthMapFBO;
+
     float scrollDelta;
     std::vector< glm::vec3 > vertices;
     std::vector< glm::vec3 > normals;
@@ -48,6 +54,7 @@ private:
     std::vector< glm::vec3 > bitangents;
     std::vector< unsigned int > indices;
 
+    glm::vec3 eye;
     glm::mat4x4 view;
     glm::mat4x4 proj;
     QMatrix4x4 rotationMat;
@@ -55,6 +62,7 @@ private:
 
     unsigned int normalTextureID;
     unsigned int textureID;
+    unsigned int depthMapID;
 };
 
 #endif // RENDERWIDGET_H

@@ -26,6 +26,10 @@ FORMS += \
     mainwindow.ui
 
 DISTFILES += \
+    debug_fragmentshader.glsl \
+    debug_vertexshader.glsl \
+    shadowmap_fragmentshader.glsl \
+    shadowmap_vertexshader.glsl \
     vertexshader.glsl \
     fragmentshader.glsl
 
