@@ -42,25 +42,24 @@ void main()
     vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
     projCoords = projCoords * 0.5 + 0.5; // Transforma de [-1,1]->[0,1]
     float shadow = 0.0;
-    // Se estiver além do far da luz deixa sem sombra
+    // Se estiver alem do far da luz deixa sem sombra
     if(projCoords.z <= 1.0) {
         float closestDepth = texture(shadowMap, projCoords.xy).r; // Pega a profundidade do mapa de sombras
         float currentDepth = float(projCoords.z); // Pega a profundidade atual
 
-        float bias = max(0.05 * (1.0 - dot(N, L)), 0.005); // Calcula um offset para remover Acne
-
         // CALCULO DO PCF
-//        int num_filter = 3;
         vec2 texelSize = 1.0/textureSize(shadowMap, 0);
-        for(int x=-1; x<=1; x++)
+        float pcfSamples = 25.0; // Apenas quadrados perfeitos de numeros impares (3^2, 5^2, 7^2, ...)
+        int limit = int((sqrt(pcfSamples)-1)/2);
+        for(int x=-limit; x<=limit; x++)
         {
-            for(int y=-1;y<=1;y++)
+            for(int y=-limit;y<=limit;y++)
             {
                 float depthPCF = texture(shadowMap, projCoords.xy + vec2(x, y)*texelSize).r;
-                shadow += (currentDepth-bias) > depthPCF ? 1.0 : 0.0;
+                shadow += currentDepth > depthPCF ? 1.0 : 0.0; // OBS: Não há necessidade de bias pois é feito um glPolygonOffset ao criar o depth map
             }
         }
-        shadow /= 9.0;
+        shadow /= pcfSamples;
     }
 
     // MONTANDO A COR FINAL

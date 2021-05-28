@@ -75,6 +75,7 @@ void RenderWidget::initializeGL()
 
     //Habilita o teste de Z
     glEnable(GL_DEPTH_TEST);
+
     //Cena de cubos
 //    createCube();
 //    createTexture("../src/cube_texture.png");
@@ -158,6 +159,8 @@ void RenderWidget::paintGL()
     QMatrix4x4 qLightSpaceMatrix(glm::value_ptr(lightSpaceMatrix));
     shadowProgram.setUniformValue("lightSpaceMatrix", qLightSpaceMatrix);
 
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(5,5);
     glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
     glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -165,6 +168,7 @@ void RenderWidget::paintGL()
         glBindTexture(GL_TEXTURE_2D, textureID);
         renderScene(shadowProgram);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDisable(GL_POLYGON_OFFSET_FILL);
 
     // 2) RENDERIZA A CENA NORMAL UTILIZANDO O DEPTH MAP COMO SHADOW MAP
     // Reseta o viewport
