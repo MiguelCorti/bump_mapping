@@ -14,13 +14,11 @@
 
 unsigned int planeVAO;
 
-const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
-unsigned int depthMapFBO;
-unsigned int depthMap;
+unsigned int gBuffer;
+unsigned int gPosition, gNormal, gColorSpec;
 glm::vec3 lightPos;
 
-QOpenGLShaderProgram shadowProgram(nullptr);
-QOpenGLShaderProgram debugProgram(nullptr);
+QOpenGLShaderProgram lightingPassProgram(nullptr);
 
 RenderWidget::RenderWidget(QWidget *parent)
     : QOpenGLWidget(parent)
@@ -40,27 +38,23 @@ void RenderWidget::initializeGL()
     // Initializa as funções OpenGL
     initializeOpenGLFunctions();
 
+    // Define valor inicial do zoom
     scrollDelta = 45.0f;
+
     // Define a cor do fundo
     glClearColor(0,0,0,1);
 
-//    // Define a viewport
-//    glViewport(0, 1, width(), height());
+    // Define a viewport
+    glViewport(0, 1, width(), height());
 
     // Compila os shaders do programa normal
     program.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/vertexshader.glsl");
     program.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/fragmentshader.glsl");
     program.link();
 
-    // Compila os shaders do programa para debug (usa o depth map como cor dos objetos)
-    debugProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/debug_vertexshader.glsl");
-    debugProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/debug_fragmentshader.glsl");
-    debugProgram.link();
-
-    // Compila os shaders do programa que calcula o shadow map
-    shadowProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/shadowmap_vertexshader.glsl");
-    shadowProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/shadowmap_fragmentshader.glsl");
-    shadowProgram.link();
+    lightingPassProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/lighting_vertexshader.glsl");
+    lightingPassProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/lighting_fragmentshader.glsl");
+    lightingPassProgram.link();
 
     eye = glm::vec3(-3.0,3.0,4.0);
     glm::vec3 center(0,0,0);
@@ -73,16 +67,15 @@ void RenderWidget::initializeGL()
 
     lightPos = glm::vec3(-1.0f, 2.0f, 2.0f);
 
-    //Habilita o teste de Z
+    // Habilita o teste de Z
     glEnable(GL_DEPTH_TEST);
-
-    //Cena de cubos
-//    createCube();
-//    createTexture("../src/cube_texture.png");
 
     // CRIANDO A ESFERA
     createSphere();
     createTexture("../src/wood_texture02.jpeg");
+
+    program.bind();
+    program.setUniformValue("sampler", 0);
     // Cria VBO e VAO da Esfera
 //    createVBO();
 
@@ -113,91 +106,90 @@ void RenderWidget::initializeGL()
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
     glBindVertexArray(0);
 
-    // CRIANDO FBO PARA O DEPTH MAP
-    glGenFramebuffers(1, &depthMapFBO);
-    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
 
-    // Criando textura do depth map
-    glGenTextures(1, &depthMap);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+
+    // -------- DEFERRED SHADING --------
+    // CRIANDO O G-BUFFER
+    glGenFramebuffers(1, &gBuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+
+    // Position color buffer
+    glGenTextures(1, &gPosition);
+    glBindTexture(GL_TEXTURE_2D, gPosition);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width(), height(), 0, GL_RGBA, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
-    // Linkando textura do depth map com o FBO
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-    const GLenum buffers[]{ GL_NONE, GL_NONE, GL_NONE, GL_NONE };
-    glDrawBuffers(4, buffers);
-    glReadBuffer(GL_NONE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+
+    // Normal color buffer
+    glGenTextures(1, &gNormal);
+    glBindTexture(GL_TEXTURE_2D, gNormal);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width(), height(), 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
+
+    // Color + Specular buffer
+    glGenTextures(1, &gColorSpec);
+    glBindTexture(GL_TEXTURE_2D, gColorSpec);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width(), height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gColorSpec, 0);
+
+    // Diz pro openGL que attachments usar para renderizar
+    unsigned int attachments[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+    glDrawBuffers(3, attachments);
+
+    // Criando depth buffer
+    unsigned int rboDepth;
+    glGenRenderbuffers(1, &rboDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width(), height());
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    program.bind();
-    program.setUniformValue("sampler", 0);
-    program.setUniformValue("shadowMap", 1);
-    debugProgram.bind();
-    debugProgram.setUniformValue("depthMap", 0);
+    lightingPassProgram.bind();
+    lightingPassProgram.setUniformValue("gPosition", 0);
+    lightingPassProgram.setUniformValue("gNormal", 1);
+    lightingPassProgram.setUniformValue("gColorSpec", 2);
 }
 
 
 void RenderWidget::paintGL()
 {
-    // 1) RENDERIZA A CENA NA POSIÇÃO DA LUZ E GUARDA O DEPTH MAP
-    glm::mat4 lightProjection, lightView, lightModel(1.0f);
-    glm::mat4 lightSpaceMatrix;
-    float near_plane = -1.0f, far_plane = 10.0f;
-//    lightProjection = glm::perspective(glm::radians(45.0f), (GLfloat)SHADOW_WIDTH / (GLfloat)SHADOW_HEIGHT, near_plane, far_plane);
-    lightProjection = glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, near_plane, far_plane);
-    lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0, 1.0, 0.0));
-//    lightModel = glm::rotate(lightModel, glm::radians(-180.0f), glm::normalize(glm::vec3(0.0, 1.0, 1.0)));
-//    lightModel = glm::rotate(lightModel, glm::radians(-180.0f), glm::normalize(glm::vec3(0.0, 1.0, 0.0)));
-    lightSpaceMatrix = lightProjection * lightView * lightModel;
-    // Renderiza a cena da posição da luz
-    shadowProgram.bind();
-    QMatrix4x4 qLightSpaceMatrix(glm::value_ptr(lightSpaceMatrix));
-    shadowProgram.setUniformValue("lightSpaceMatrix", qLightSpaceMatrix);
-
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(5,5);
-    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, textureID);
-        renderScene(shadowProgram);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glDisable(GL_POLYGON_OFFSET_FILL);
-
-    // 2) RENDERIZA A CENA NORMAL UTILIZANDO O DEPTH MAP COMO SHADOW MAP
-    // Reseta o viewport
-    glViewport(0, 0, width(), height());
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    program.bind();
-    program.setUniformValue("lightSpaceMatrix", qLightSpaceMatrix);
-    program.setUniformValue("viewPos", QVector3D(eye.x, eye.y, eye.z));
-    program.setUniformValue("lightPosition", QVector3D(lightPos.x,lightPos.y,lightPos.z) );
-    program.setUniformValue("material.ambient", QVector3D(0.1f,0.1f,0.1f));
-    program.setUniformValue("material.diffuse", QVector3D(1.0f,1.0f,1.0f));
-    program.setUniformValue("material.specular", QVector3D(1.0f,1.0f,1.0f));
-    program.setUniformValue("material.shininess", 100.0f);
+    // PASSO 1) Renderiza a geometria e cores da cena no G-Buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        program.bind();
 
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        renderScene(program);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Passo 2) Calcula a luz iterando pixel por pixel de um quadrado do tamanho da tela e preenche usando os dados do G-Buffer
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    lightingPassProgram.bind();
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, textureID);
+    glBindTexture(GL_TEXTURE_2D, gPosition);
     glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, depthMap);
-    renderScene(program);
+    glBindTexture(GL_TEXTURE_2D, gNormal);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, gColorSpec);
 
+    lightingPassProgram.setUniformValue("viewPos", QVector3D(eye.x, eye.y, eye.z));
+    lightingPassProgram.setUniformValue("lightPosition", QVector3D(lightPos.x,lightPos.y,lightPos.z) );
+    renderQuad();
 
-    // DEBUG) Renderiza o depth map como textura para debug
-//    debugProgram.bind();
-//    debugProgram.setUniformValue("near_plane", near_plane);
-//    debugProgram.setUniformValue("far_plane", far_plane);
-//    glActiveTexture(GL_TEXTURE0);
-//    glBindTexture(GL_TEXTURE_2D, depthMap);
-//    renderQuad();
+    // Passo 2.5) copia os dados do depth buffer vindo da gBuffer para o framebuffer padrão
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // escreve no framebuffer padrão
+    glBlitFramebuffer(0, 0, width(), height(), 0, 0, width(), height(), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void RenderWidget::renderScene(QOpenGLShaderProgram &shader) {
