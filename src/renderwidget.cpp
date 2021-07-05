@@ -8,6 +8,7 @@
 #include <QtMath>
 
 #include <cmath>
+#include <random>
 #ifndef M_PI
     #define M_PI 3.14159265358979323846
 #endif
@@ -15,10 +16,15 @@
 unsigned int planeVAO;
 
 unsigned int gBuffer;
-unsigned int gPosition, gNormal, gColorSpec;
+unsigned int gPosition, gNormal, gColorSpec; // Buffers de textura da primeira passada (G-Buffer)
+unsigned int noiseTexture;
+unsigned int ssaoFBO, ssaoColorBuffer;
+unsigned int ssaoBlurFBO, ssaoColorBufferBlur;
+int kernelSize = 64;
+QVector<QVector3D> ssaoKernel(kernelSize);
 glm::vec3 lightPos;
 
-QOpenGLShaderProgram lightingPassProgram(nullptr);
+QOpenGLShaderProgram lightingPassProgram(nullptr), ssaoProgram(nullptr), ssaoBlurProgram(nullptr);
 
 RenderWidget::RenderWidget(QWidget *parent)
     : QOpenGLWidget(parent)
@@ -47,12 +53,23 @@ void RenderWidget::initializeGL()
     // Define a viewport
     glViewport(0, 1, width(), height());
 
-    // Compila os shaders do programa normal
+    // Compila os shaders do programa que calcula a geometria e mapea texturas na cor
     program.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/vertexshader.glsl");
     program.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/fragmentshader.glsl");
     program.link();
 
-    lightingPassProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/lighting_vertexshader.glsl");
+    // Compila os shaders que calculam o efeito do SSAO
+    ssaoProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/simple_vertexshader.glsl");
+    ssaoProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/ssao_fragmentshader.glsl");
+    ssaoProgram.link();
+
+    // Compila os shaders que calculam o efeito de blur no SSAO
+    ssaoBlurProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/simple_vertexshader.glsl");
+    ssaoBlurProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/blur_fragmentshader.glsl");
+    ssaoBlurProgram.link();
+
+    // Compila os shaders que calculam a cor final considerando luz e resultados anteriores
+    lightingPassProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, "../src/simple_vertexshader.glsl");
     lightingPassProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, "../src/lighting_fragmentshader.glsl");
     lightingPassProgram.link();
 
@@ -70,16 +87,20 @@ void RenderWidget::initializeGL()
     // Habilita o teste de Z
     glEnable(GL_DEPTH_TEST);
 
-    // CRIANDO A ESFERA
-    createSphere();
+    // Configura a textura para ser usada na posição de textura 0
     createTexture("../src/wood_texture02.jpeg");
 
+    // Passa para o programa a posição da textura dos objetos
     program.bind();
     program.setUniformValue("sampler", 0);
+
+
+    // Define os parametros para desenhar a esfera em arrays da classe
+    createSphere();
     // Cria VBO e VAO da Esfera
 //    createVBO();
 
-    // CRIANDO O PLANO
+    // Cria parametros para desenhar o plano
     float planeVertices[] = {
         // positions            // normals         // texcoords
          25.0f, -0.5f,  25.0f,  0.0f, 1.0f, 0.0f,  25.0f,  0.0f,
@@ -107,8 +128,7 @@ void RenderWidget::initializeGL()
     glBindVertexArray(0);
 
 
-
-    // -------- DEFERRED SHADING --------
+    // -------- GEOMETRY PASS BUFFERS --------
     // CRIANDO O G-BUFFER
     glGenFramebuffers(1, &gBuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
@@ -119,6 +139,8 @@ void RenderWidget::initializeGL()
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width(), height(), 0, GL_RGBA, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
 
     // Normal color buffer
@@ -149,10 +171,84 @@ void RenderWidget::initializeGL()
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+    // -------- SSAO BUFFERS --------
+    glGenFramebuffers(1, &ssaoFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+
+    glGenTextures(1, &ssaoColorBuffer);
+    glBindTexture(GL_TEXTURE_2D, ssaoColorBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width(), height(), 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ssaoColorBuffer, 0);
+
+    // SSAO Buffer para blur
+    glGenFramebuffers(1, &ssaoBlurFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+    glGenTextures(1, &ssaoColorBufferBlur);
+    glBindTexture(GL_TEXTURE_2D, ssaoColorBufferBlur);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, width(), height(), 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ssaoColorBufferBlur, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Gera as posicoes das amostras para serem usadas no SSAO
+    std::uniform_real_distribution<GLfloat> randomFloats(0.0, 1.0);
+    std::default_random_engine generator;
+    for (int i = 0; i < kernelSize; ++i)
+    {
+        glm::vec3 sample(
+            randomFloats(generator)*2.0 - 1.0,
+            randomFloats(generator)*2.0 - 1.0,
+            randomFloats(generator)
+        );
+        sample = glm::normalize(sample);
+        sample *= randomFloats(generator);
+        float scale = float(i) / 64.0;
+
+        // Espalha as amostras para ter mais amostras proximas ao centro
+        float min = 0.1f, max = 1.0f;
+        scale = min + (scale*scale)*(max-min);
+        sample *= scale;
+        ssaoKernel[i] = QVector3D(sample.x, sample.y, sample.z);
+    }
+
+    // Gera um vetor de pertubacoes para diferenciar as amostras escolhidas em cada fragmento
+    std::vector<glm::vec3> ssaoNoise;
+    for (int i = 0; i < 16; i++)
+    {
+        glm::vec3 noise(
+            randomFloats(generator)*2.0 - 1.0,
+            randomFloats(generator)*2.0 - 1.0,
+            0.0f
+        ); // rotaciona apenas no plano xy (in tangent space)
+        ssaoNoise.push_back(noise);
+    }
+    // Associa o vetor de pertubacoes a um buffer de textura
+    glGenTextures(1, &noiseTexture);
+    glBindTexture(GL_TEXTURE_2D, noiseTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 4, 4, 0, GL_RGB, GL_FLOAT, &ssaoNoise[0]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    // Passa para o programa de ssao posição dos buffers necessários
+    ssaoProgram.bind();
+    ssaoProgram.setUniformValue("gPosition", 0);
+    ssaoProgram.setUniformValue("gNormal", 1);
+    ssaoProgram.setUniformValue("noise", 2);
+
+    ssaoBlurProgram.bind();
+    ssaoBlurProgram.setUniformValue("ssao", 0);
+
+    // Passa para o programa de calculo da luz a posição dos buffers da primeira e segunda passada
     lightingPassProgram.bind();
     lightingPassProgram.setUniformValue("gPosition", 0);
     lightingPassProgram.setUniformValue("gNormal", 1);
     lightingPassProgram.setUniformValue("gColorSpec", 2);
+    lightingPassProgram.setUniformValue("ssao", 3);
 }
 
 
@@ -171,7 +267,40 @@ void RenderWidget::paintGL()
         renderScene(program);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // Passo 2) Calcula a luz iterando pixel por pixel de um quadrado do tamanho da tela e preenche usando os dados do G-Buffer
+    // PASSO 2) Calcula a textura SSAO
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ssaoProgram.bind();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, gPosition);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, gNormal);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, noiseTexture);
+
+        QMatrix4x4 p(glm::value_ptr(glm::transpose(proj)));
+        ssaoProgram.setUniformValue("projection", p);
+        ssaoProgram.setUniformValue("kernelSize", kernelSize);
+        ssaoProgram.setUniformValue("width", width());
+        ssaoProgram.setUniformValue("height", height());
+        for(int i=0; i<kernelSize; i++) {
+            std::string name = "samples["+ std::to_string(i) +"]";
+            ssaoProgram.setUniformValue(name.c_str(), ssaoKernel[i]);
+        }
+
+        renderQuad();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // PASSO 3) Aplicar blir no resultado do ssao
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ssaoBlurProgram.bind();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ssaoColorBuffer);
+        renderQuad();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // PASSO 4) Calcula a luz iterando pixel por pixel de um quadrado do tamanho da tela e preenche usando os dados do G-Buffer e de SSAO
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     lightingPassProgram.bind();
     glActiveTexture(GL_TEXTURE0);
@@ -180,12 +309,14 @@ void RenderWidget::paintGL()
     glBindTexture(GL_TEXTURE_2D, gNormal);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, gColorSpec);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, ssaoColorBufferBlur);
 
     lightingPassProgram.setUniformValue("viewPos", QVector3D(eye.x, eye.y, eye.z));
     lightingPassProgram.setUniformValue("lightPosition", QVector3D(lightPos.x,lightPos.y,lightPos.z) );
     renderQuad();
 
-    // Passo 2.5) copia os dados do depth buffer vindo da gBuffer para o framebuffer padrão
+    // PASSO 4.5) copia os dados do depth buffer vindo da gBuffer para o framebuffer padrão
     glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // escreve no framebuffer padrão
     glBlitFramebuffer(0, 0, width(), height(), 0, 0, width(), height(), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
@@ -200,22 +331,22 @@ void RenderWidget::renderScene(QOpenGLShaderProgram &shader) {
     shader.setUniformValue("view", v);
     shader.setUniformValue("proj", p);
     // DESENHANDO O PLANO
-    m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
-    m = rotationMat*m;
-    shader.setUniformValue("model", m);
-    mv = v * m;
-    mvp = p * mv;
-    shader.setUniformValue("mv", mv);
-    shader.setUniformValue("mv_ti", mv.inverted().transposed());
-    shader.setUniformValue("mvp", mvp);
-    // Desenha
-    glBindVertexArray(planeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+//    m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
+//    m = rotationMat*m;
+//    shader.setUniformValue("model", m);
+//    mv = v * m;
+//    mvp = p * mv;
+//    shader.setUniformValue("mv", mv);
+//    shader.setUniformValue("mv_ti", mv.inverted().transposed());
+//    shader.setUniformValue("mvp", mvp);
+//    // Desenha
+//    glBindVertexArray(planeVAO);
+//    glDrawArrays(GL_TRIANGLES, 0, 6);
 
     // DESENHANDO UMA ESFERA
     m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
-    m.translate(0.0f,1.0f,2.0f);
-    m.scale(0.5f);
+    m.translate(0.0f,0.0f,-4.0f);
+    m.scale(1.0f);
     m = rotationMat*m;
     mv = v * m;
     mvp = p * mv;
@@ -229,20 +360,22 @@ void RenderWidget::renderScene(QOpenGLShaderProgram &shader) {
     // DESENHANDO OS CUBOS
     // Cubo 01
     m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
-    m.translate(0.0f,1.5f,0.0f);
-    m.scale(0.5f);
+    m.translate(0.0f,5.0f,0.0f);
+    m.scale(5.0f);
     m = rotationMat*m;
     mv = v * m;
     mvp = p * mv;
+    shader.setUniformValue("invertNormals", 1);
     shader.setUniformValue("model", m);
     shader.setUniformValue("mv", mv);
     shader.setUniformValue("mv_ti", mv.inverted().transposed());
     shader.setUniformValue("mvp", mvp);
     renderCube(); // Desenha
+    shader.setUniformValue("invertNormals", 0);
 
     // Cubo 02
     m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
-    m.translate(2.0f,0.0f,1.0f);
+    m.translate(0.0f,0.0f,0.0f);
     m.scale(0.5f);
     m = rotationMat*m;
     mv = v * m;
@@ -255,10 +388,8 @@ void RenderWidget::renderScene(QOpenGLShaderProgram &shader) {
 
     // Cubo 03
     m = QMatrix4x4(glm::value_ptr(glm::mat4(1.0f)));
-    m.translate(-1.0f,0.0f,2.0f);
-    m.rotate(60.0f, QVector3D(1.0, 0.0, 0.0));
+    m.translate(5.0f,0.5f,-1.5f);
     m = rotationMat*m;
-    m.scale(0.25f);
     mv = v * m;
     mvp = p * mv;
     shader.setUniformValue("model", m);

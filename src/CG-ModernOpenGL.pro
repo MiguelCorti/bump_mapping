@@ -26,8 +26,10 @@ FORMS += \
     mainwindow.ui
 
 DISTFILES += \
+    blur_fragmentshader.glsl \
     lighting_fragmentshader.glsl \
-    lighting_vertexshader.glsl \
+    simple_vertexshader.glsl \
+    ssao_fragmentshader.glsl \
     vertexshader.glsl \
     fragmentshader.glsl
 

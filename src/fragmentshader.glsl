@@ -13,6 +13,6 @@ void main()
 {
     gPosition = fragPos; // guarda a pos do fragmento no primeiro buffer
     gNormal = normalize(fragNormal); // guarda a normal do fragmento
-    gColorSpec.rgb = texture(sampler, fragUV).rgb; // guarda o valor da componente difusa
+    gColorSpec.rgb = vec3(0.9, 0.9, 0.9);//texture(sampler, fragUV).rgb; // guarda o valor da componente difusa
     gColorSpec.a = 50.0; // intensidade especular hard coded
 }
